@@ -1,0 +1,19 @@
+# --- your existing entry ---
+*.csv_
+
+# --- raw source dataset (large, publicly available at data.gov.sg -- cited instead of versioned) ---
+resale_flat_prices.csv
+
+# --- Python bytecode cache ---
+__pycache__/
+*.pyc
+
+# --- editor/IDE settings (personal, not part of the project) ---
+.vscode/
+
+# --- Jupyter checkpoint files ---
+.ipynb_checkpoints/
+
+# --- submission documents (kept in your zip, not the repo) ---
+*.docx
+CAI2C08 MLDP Apr 2026 Sem - Project Specification.pdf
