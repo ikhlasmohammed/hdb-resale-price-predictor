@@ -4,3 +4,4 @@ numpy
 scikit-learn==1.8.0
 joblib
 plotly
+pillow
