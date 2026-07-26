@@ -450,6 +450,16 @@ def render_market_chart(bands, n_comparables: int) -> None:
         yaxis=dict(tickprefix="S$", tickformat=",.0f", gridcolor="rgba(59,130,246,0.08)"),
         xaxis=dict(showgrid=False),
         showlegend=False,
+        # Plotly auto-picks hover-label text/background colour from the
+        # trace's marker colour. Most of our bars use a translucent blue
+        # (rgba(...,0.30)) rather than a solid one, and Plotly's contrast
+        # guess gets it wrong for that -- landing on light text over a
+        # near-white box, which is why hovering showed a blank tooltip.
+        # Setting this explicitly removes the guesswork.
+        hoverlabel=dict(
+            bgcolor="#0c1b30", bordercolor="#3b82f6",
+            font=dict(family="Montserrat", color="#dce8f8", size=12),
+        ),
     )
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     st.caption(f"Based on {n_comparables} comparable resale transactions in the 2025\u201326 sample.")
