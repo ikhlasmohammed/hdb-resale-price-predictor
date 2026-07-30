@@ -10,11 +10,6 @@ Required files in the SAME folder as this script:
     hdb_reference_data.csv   - 5,000-row stratified sample, used for the
                                market-context chart & recent comparables
                                (produced in Section 6 of the notebook)
-
-Assets required alongside this script (in an assets/ subfolder):
-    assets/valuai_icon.png             - house mark only, square, transparent
-    assets/valuai_logo_transparent.png - icon + "VALU.AI" wordmark, transparent
-====================================================================
 """
 
 # ────────────────────────────────────────────────────────────────────
@@ -50,9 +45,9 @@ st.set_page_config(
 @st.cache_resource(show_spinner=False)
 def load_model_artifacts():
     model = joblib.load("lr_log_model.pkl")
-    encoder = joblib.load("onehot_encoder.pkl")
     feature_columns = joblib.load("feature_columns.pkl")
-    return model, encoder, feature_columns
+    category_options = joblib.load("category_options.pkl")
+    return model, feature_columns, category_options
 
 
 @st.cache_data(show_spinner=False)
@@ -61,23 +56,24 @@ def load_reference_data():
 
 
 try:
-    model, encoder, feature_columns = load_model_artifacts()
+    model, feature_columns, category_options = load_model_artifacts()
     reference_df = load_reference_data()
 except FileNotFoundError:
     st.error(
         "Model files are missing from the app folder. Please make sure "
-        "**lr_log_model.pkl**, **onehot_encoder.pkl**, **feature_columns.pkl** "
+        "**lr_log_model.pkl**, **feature_columns.pkl**, **category_options.pkl** "
         "and **hdb_reference_data.csv** sit in the same directory as app.py "
         "(see Section 6 of Ikhlas_Code.ipynb to generate them)."
     )
     st.stop()
 
-# Dropdown options are read straight from the fitted encoder. This
-# guarantees the app can never offer a category the model wasn't
-# trained on, without needing to keep a second hardcoded list in sync.
-TOWN_OPTIONS = sorted(encoder.categories_[0])
-FLAT_TYPE_OPTIONS = sorted(encoder.categories_[1])
-FLAT_MODEL_OPTIONS = sorted(encoder.categories_[2])
+# Dropdown options come from the training set's own category lists,
+# saved at training time. This guarantees the app can never offer a
+# category the model wasn't trained on, without needing to keep a
+# second hardcoded list in sync.
+TOWN_OPTIONS = category_options['town']
+FLAT_TYPE_OPTIONS = category_options['flat_type']
+FLAT_MODEL_OPTIONS = category_options['flat_model']
 
 # Raw values in the dataset are upper-case (e.g. "ANG MO KIO", "4 ROOM").
 # Title-case them for display, but keep flat_model as-is since several
@@ -95,27 +91,22 @@ FLOOR_AREA_MIN, FLOOR_AREA_MAX = 52, 157        # from EDA describe() in 2.2
 # user for their real floor (better UX, matches how buyers think), and
 # storey_to_bin() converts it to the exact bin the model expects, so
 # accuracy is unaffected by asking for the real floor instead of the bin.
-STOREY_MIN, STOREY_MAX = 1, 46                  # from EDA describe() in 2.2
+STOREY_MIN, STOREY_MAX = 1, 46                  # from storey_lower.describe() in 3.1
 STOREY_BIN_SIZE = 3                             # HDB storey_range bands are fixed 3-floor bins
 
 # remaining_lease_months is the precise feature the model trained on.
 # The app collects it as (years, extra months) for a more natural input,
 # then combines the two before prediction.
-LEASE_YEARS_MIN, LEASE_YEARS_MAX = 40, 97       # from remaining_lease_months describe()
+LEASE_YEARS_MIN, LEASE_YEARS_MAX = 39, 95       # from remaining_lease_months describe()
 LEASE_MONTHS_MIN, LEASE_MONTHS_MAX = 0, 11      # leftover months on top of the whole-year part
 LEASE_TERM_MONTHS = 99 * 12                     # HDB flats carry a 99-year lease
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 4 — Theme: Bootstrap 5 + Montserrat, matched to the Figma design
+# Section 4 — Theme: Bootstrap 5 + Montserrat
 # ────────────────────────────────────────────────────────────────────
 def inject_theme() -> None:
-    # IMPORTANT: every line below is flush against the left margin (no
-    # leading indentation). Streamlit's markdown renderer can misinterpret
-    # an INDENTED <style> block — it treats the indentation as a code block
-    # rather than raw HTML, which causes chunks of the CSS to leak onto the
-    # page as visible text instead of being applied as styling. Keeping this
-    # string unindented avoids that.
+   
     theme_css = """<link href="https://cdn.jsdelivr.net/npm/[email protected]/dist/css/bootstrap.min.css" rel="stylesheet">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -130,7 +121,7 @@ def inject_theme() -> None:
    inheritance, and inheritance loses to any rule -- important or not --
    that targets an element directly. Streamlit's own stylesheet sets
    font-family directly on headings, paragraphs, dropdown text, etc., so
-   that's what was actually showing before, not our Montserrat import.
+   that's what was actually showing before, not the Montserrat import.
    A single `*` rule targets every element directly instead, so nothing
    is left depending on inheritance. */
 * { font-family:'Montserrat',sans-serif !important; }
@@ -220,7 +211,7 @@ st.session_state.setdefault("prev_price", None)
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 6 — Prediction logic (mirrors the notebook's sanity-check cell)
+# Section 6 — Prediction logic 
 # ────────────────────────────────────────────────────────────────────
 def storey_to_bin(storey: int) -> tuple[int, str]:
     """Maps a real floor number to the fixed 3-floor storey_range bin used
@@ -255,12 +246,12 @@ def predict_price(town_raw, flat_type_raw, floor_area_sqm, storey_lower,
         "storey_lower": [storey_lower],
     })
 
-    encoded = encoder.transform(raw_row[CAT_COLS])
-    encoded_df = pd.DataFrame(encoded, columns=encoder.get_feature_names_out(CAT_COLS))
-
-    model_input = pd.concat(
-        [raw_row.drop(columns=CAT_COLS).reset_index(drop=True), encoded_df], axis=1
-    ).reindex(columns=feature_columns, fill_value=0)
+# Same pattern as training: get_dummies() this single row, then
+    # reindex to the exact training column list. Any category not seen
+    # in training simply produces all-zero dummy columns here, the same
+    # safe fallback OneHotEncoder's handle_unknown='ignore' used to give.
+    model_input = pd.get_dummies(raw_row, columns=CAT_COLS, drop_first=True)
+    model_input = model_input.reindex(columns=feature_columns, fill_value=0)
 
     pred_log = model.predict(model_input)[0]
     return float(np.expm1(pred_log))
@@ -339,6 +330,14 @@ def render_sidebar() -> bool:
         with lease_col_mos:
             st.number_input("+ Months", LEASE_MONTHS_MIN, LEASE_MONTHS_MAX,
                              key="remaining_lease_extra_months")
+            
+        remaining_lease_months = st.session_state["remaining_lease_years"] * 12 + st.session_state["remaining_lease_extra_months"]
+
+        """Just to show user that prediction may be inaccurate. 
+        As my model was trained on data with lease months between 475 and 1144, 
+        any lease outside this range may not be accurate."""
+        if remaining_lease_months < 475 or remaining_lease_months > 1144:
+            st.caption("This lease duration is outside the range of transactions in our training data.")
 
         st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
         predict_clicked = st.button("Predict Price", width="stretch")
@@ -570,7 +569,7 @@ def render_footer() -> None:
     st.markdown(
         """
         <div class="text-center hdb-muted" style="font-size:0.7rem; padding:18px 0 6px;">
-            Estimates based on HDB Resale Price Index data (data.gov.sg, 2025\u201326) &middot; For reference only
+            Estimates based on HDB Resale Flat Prices data (data.gov.sg, 2025\u201326) &middot; For reference only
         </div>
         """,
         unsafe_allow_html=True,
