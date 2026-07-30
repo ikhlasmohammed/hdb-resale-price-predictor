@@ -333,9 +333,9 @@ def render_sidebar() -> bool:
             
         remaining_lease_months = st.session_state["remaining_lease_years"] * 12 + st.session_state["remaining_lease_extra_months"]
 
-        """Just to show user that prediction may be inaccurate. 
-        As my model was trained on data with lease months between 475 and 1144, 
-        any lease outside this range may not be accurate."""
+        #Just to show user that prediction may be inaccurate. 
+        #As my model was trained on data with lease months between 475 and 1144, 
+        #any lease outside this range may not be accurate.
         if remaining_lease_months < 475 or remaining_lease_months > 1144:
             st.caption("This lease duration is outside the range of transactions in our training data.")
 
