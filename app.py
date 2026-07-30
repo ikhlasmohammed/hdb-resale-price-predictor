@@ -1,21 +1,21 @@
 """
-====================================================================
-HDB Resale Price Predictor — Streamlit Web Application
-====================================================================
+HDB Resale Price Predictor - Streamlit Web Application
 
 Required files in the SAME folder as this script:
     lr_log_model.pkl        - trained LinearRegression (log target)
-    onehot_encoder.pkl       - fitted OneHotEncoder (town/flat_type/flat_model)
+    category_options.pkl       - fitted OneHotEncoder (town/flat_type/flat_model)
     feature_columns.pkl      - exact column order the model expects
     hdb_reference_data.csv   - 5,000-row stratified sample, used for the
                                market-context chart & recent comparables
                                (produced in Section 6 of the notebook)
+    assets/valuai_icon.png - app icon (favicon) and top-left logo
 """
 
 # ────────────────────────────────────────────────────────────────────
-# Section 1 — Imports
+# Section 1 - Imports
 # ────────────────────────────────────────────────────────────────────
 from datetime import datetime
+from sys import prefix
 
 import joblib
 import numpy as np
@@ -29,7 +29,7 @@ CURRENT_YEAR = datetime.now().year  # used to back-calculate lease commencement 
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 2 — Page configuration
+# Section 2 - Page configuration
 # ────────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Valu.ai",
@@ -40,7 +40,7 @@ st.set_page_config(
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 3 — Load model artefacts & reference data (cached)
+# Section 3 - Load model artefacts & reference data (cached)
 # ────────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def load_model_artifacts():
@@ -88,7 +88,7 @@ FLOOR_AREA_MIN, FLOOR_AREA_MAX = 52, 157        # from EDA describe() in 2.2
 # The model was trained on storey_lower (the start of a fixed 3-floor band,
 # e.g. "13 TO 15" -> 13), NOT a raw floor number. STOREY_MIN/MAX below are
 # the real range of actual floors a flat can be on; the app still asks the
-# user for their real floor (better UX, matches how buyers think), and
+# user for their real floor, and
 # storey_to_bin() converts it to the exact bin the model expects, so
 # accuracy is unaffected by asking for the real floor instead of the bin.
 STOREY_MIN, STOREY_MAX = 1, 46                  # from storey_lower.describe() in 3.1
@@ -103,7 +103,7 @@ LEASE_TERM_MONTHS = 99 * 12                     # HDB flats carry a 99-year leas
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 4 — Theme: Bootstrap 5 + Montserrat
+# Section 4 - Theme: Bootstrap + Montserrat
 # ────────────────────────────────────────────────────────────────────
 def inject_theme() -> None:
    
@@ -149,7 +149,7 @@ transition:all .15s;
 .stButton>button p { color:#fff !important; }
 div[data-baseweb="select"] > div, .stRadio { background: transparent; }
 /* DevTools confirmed data-baseweb="slider" doesn't exist in this Streamlit
-   version — every rule above that used to target it was a silent no-op.
+   version - every rule above that used to target it was a silent no-op.
    [data-testid="stSlider"] is the stable wrapper Streamlit still guarantees
    regardless of internal markup; role="slider" and the inline height-styled
    div are the real thumb/track confirmed from the pasted HTML. */
@@ -157,7 +157,7 @@ div[data-baseweb="select"] > div, .stRadio { background: transparent; }
 [data-testid="stSlider"] div[data-testid="stTickBarMin"], [data-testid="stSlider"] div[data-testid="stTickBarMax"]{ color:var(--text-muted) !important; background:transparent !important; }
 /* The track is a single div (not separate filled/unfilled divs), so we
    paint it one solid colour rather than guess at a gradient syntax we
-   can't see — simpler and avoids further blind guessing. */
+   can't see - simpler and avoids further blind guessing. */
 [data-testid="stSlider"] div[style*="height"]:not([role="slider"]):not([data-testid="stTickBarMin"]):not([data-testid="stTickBarMax"]){ background:var(--accent) !important; background-image:none !important; }
 .mono{ font-family:'Montserrat',sans-serif; font-variant-numeric: tabular-nums; }
 .hdb-card{
@@ -190,7 +190,7 @@ inject_theme()
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 5 — Session state defaults
+# Section 5 - Session state defaults
 # ────────────────────────────────────────────────────────────────────
 DEFAULTS = {
     "town_label": "Tampines",
@@ -211,7 +211,7 @@ st.session_state.setdefault("prev_price", None)
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 6 — Prediction logic 
+# Section 6 - Prediction logic 
 # ────────────────────────────────────────────────────────────────────
 def storey_to_bin(storey: int) -> tuple[int, str]:
     """Maps a real floor number to the fixed 3-floor storey_range bin used
@@ -236,22 +236,24 @@ def predict_price(town_raw, flat_type_raw, floor_area_sqm, storey_lower,
     elapsed_months = LEASE_TERM_MONTHS - remaining_lease_months
     lease_commence_date = CURRENT_YEAR - round(elapsed_months / 12)
 
-    raw_row = pd.DataFrame({
-        "town": [town_raw],
-        "flat_type": [flat_type_raw],
-        "floor_area_sqm": [floor_area_sqm],
-        "flat_model": [flat_model_raw],
-        "lease_commence_date": [lease_commence_date],
-        "remaining_lease_months": [remaining_lease_months],
-        "storey_lower": [storey_lower],
-    })
+    # Build the row directly against the exact training columns instead of
+    # calling get_dummies() on a single row. get_dummies() on one row only
+    # ever sees one category per column, and drop_first=True then drops
+    # that column entirely -- meaning town/flat_type/flat_model would
+    # ALWAYS encode as all-zero regardless of what the user picked. Setting
+    # the matching dummy column to 1 by name (when it exists in
+    # feature_columns) reproduces exactly what get_dummies would have
+    # produced on the full training set for that category.
+    model_input = pd.DataFrame(0, index=[0], columns=feature_columns)
+    model_input.loc[0, "floor_area_sqm"] = floor_area_sqm
+    model_input.loc[0, "lease_commence_date"] = lease_commence_date
+    model_input.loc[0, "remaining_lease_months"] = remaining_lease_months
+    model_input.loc[0, "storey_lower"] = storey_lower
 
-# Same pattern as training: get_dummies() this single row, then
-    # reindex to the exact training column list. Any category not seen
-    # in training simply produces all-zero dummy columns here, the same
-    # safe fallback OneHotEncoder's handle_unknown='ignore' used to give.
-    model_input = pd.get_dummies(raw_row, columns=CAT_COLS, drop_first=True)
-    model_input = model_input.reindex(columns=feature_columns, fill_value=0)
+    for prefix, raw_value in [("town", town_raw), ("flat_type", flat_type_raw), ("flat_model", flat_model_raw)]:
+        dummy_col = f"{prefix}_{raw_value}"
+        if dummy_col in model_input.columns:
+            model_input.loc[0, dummy_col] = 1
 
     pred_log = model.predict(model_input)[0]
     return float(np.expm1(pred_log))
@@ -293,7 +295,7 @@ def get_comparables(flat_type_raw: str, town_raw: str, n: int = 3) -> pd.DataFra
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 7 — Sidebar (inputs)
+# Section 7 - Sidebar (inputs)
 # ────────────────────────────────────────────────────────────────────
 def render_sidebar() -> bool:
     with st.sidebar:
@@ -350,7 +352,7 @@ def render_sidebar() -> bool:
 
 def _reset_form() -> None:
     """Runs BEFORE the rerun triggered by the Reset button (via on_click),
-    which is required — Streamlit blocks writes to a widget-bound
+    which is required - Streamlit blocks writes to a widget-bound
     session_state key once that widget has already rendered in the
     current script run."""
     for k, v in DEFAULTS.items():
@@ -361,7 +363,7 @@ def _reset_form() -> None:
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 8 — Main panel: topbar, empty state, result panel
+# Section 8 - Main panel: topbar, empty state, result panel
 # ────────────────────────────────────────────────────────────────────
 def render_topbar() -> None:
     state = st.session_state["app_state"]
@@ -577,7 +579,7 @@ def render_footer() -> None:
 
 
 # ────────────────────────────────────────────────────────────────────
-# Section 9 — App entry point
+# Section 9 - App entry point
 # ────────────────────────────────────────────────────────────────────
 def main() -> None:
     predict_clicked = render_sidebar()
